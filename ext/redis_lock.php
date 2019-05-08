@@ -22,15 +22,32 @@ namespace ext;
 
 class redis_lock extends redis
 {
-    //Lock sets
-    private $locks = [];
-
-    //Lock key prefix
+    //Key prefix
     const PREFIX = 'LOCK:';
 
-    //Retry properties
-    const WAIT  = 1000;
+    //Wait time
+    const WAIT = 1000;
+
+    //Retry limit
     const RETRY = 10;
+
+    //Lock pool
+    private $locks = [];
+
+    /** @var \Redis $connect */
+    private $connect = null;
+
+    /**
+     * Connect to Redis
+     *
+     * @return $this
+     * @throws \RedisException
+     */
+    public function connect(): object
+    {
+        $this->connect = parent::connect();
+        return $this;
+    }
 
     /**
      * Lock on
@@ -39,7 +56,6 @@ class redis_lock extends redis
      * @param int    $life
      *
      * @return bool
-     * @throws \RedisException
      */
     public function on(string $key, int $life = 3): bool
     {
@@ -49,7 +65,6 @@ class redis_lock extends redis
         while ($retry <= self::RETRY) {
             if ($this->lock($key, $life)) {
                 register_shutdown_function([$this, 'clear']);
-
                 unset($key, $life, $retry);
                 return true;
             }
@@ -66,13 +81,11 @@ class redis_lock extends redis
      * Lock off
      *
      * @param string $key
-     *
-     * @throws \RedisException
      */
     public function off(string $key): void
     {
         $key = self::PREFIX . $key;
-        parent::connect()->del($key);
+        $this->connect->del($key);
 
         if (false !== $key = array_search($key, $this->locks, true)) {
             unset($this->locks[$key]);
@@ -83,13 +96,11 @@ class redis_lock extends redis
 
     /**
      * Clear all locks
-     *
-     * @throws \RedisException
      */
     public function clear(): void
     {
         if (!empty($this->locks)) {
-            call_user_func_array([parent::connect(), 'del'], $this->locks);
+            call_user_func_array([$this->connect, 'del'], $this->locks);
             $this->locks = [];
         }
     }
@@ -101,20 +112,17 @@ class redis_lock extends redis
      * @param int    $life
      *
      * @return bool
-     * @throws \RedisException
      */
     private function lock(string $key, int $life): bool
     {
-        $redis = parent::connect();
-
-        if (!$redis->setnx($key, time())) {
+        if (!$this->connect->setnx($key, time())) {
             return false;
         }
 
-        $redis->expire($key, 0 < $life ? $life : 3);
+        $this->connect->expire($key, 0 < $life ? $life : 3);
         $this->locks[] = &$key;
 
-        unset($key, $life, $redis);
+        unset($key, $life);
         return true;
     }
 }

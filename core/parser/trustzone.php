@@ -48,7 +48,7 @@ class trustzone extends factory
             $record = parent::obtain($class)->tz ?? [];
         } else {
             //Fetch via constructor property
-            $record = parent::obtain($class, data::build_argv(parent::reflect($class, '__construct'), parent::$data))->tz ?? [];
+            $record = parent::obtain($class, data::build_argv(parent::reflect_method($class, '__construct'), parent::$data))->tz ?? [];
         }
 
         if (is_array($record)) {
@@ -75,21 +75,6 @@ class trustzone extends factory
 
         unset($class, $record);
         return array_keys(self::$record);
-    }
-
-    /**
-     * Get method dependency
-     *
-     * @param string $method
-     *
-     * @return array
-     */
-    public static function get_dep(string $method): array
-    {
-        return [
-            'pre'  => isset(self::$record[$method]['pre']) ? self::fill_val(self::$record[$method]['pre']) : [],
-            'post' => isset(self::$record[$method]['post']) ? self::fill_val(self::$record[$method]['post']) : []
-        ];
     }
 
     /**
@@ -122,12 +107,26 @@ class trustzone extends factory
             //Report TrustZone missing
             throw new \Exception(
                 $class . '::' . $method
-                . ': TrustZone mismatch [' . (implode(', ', $diff)) . ']',
-                E_USER_WARNING
+                . ': TrustZone mismatch [' . (implode(', ', $diff)) . ']'
             );
         }
 
         unset($class, $method, $value, $param, $diff);
+    }
+
+    /**
+     * Get method dependency
+     *
+     * @param string $method
+     *
+     * @return array
+     */
+    public static function get_dep(string $method): array
+    {
+        return [
+            'pre'  => isset(self::$record[$method]['pre']) ? self::fill_val(self::$record[$method]['pre']) : [],
+            'post' => isset(self::$record[$method]['post']) ? self::fill_val(self::$record[$method]['post']) : []
+        ];
     }
 
     /**

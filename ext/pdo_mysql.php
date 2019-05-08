@@ -24,6 +24,24 @@ class pdo_mysql extends pdo
     //Runtime params
     private $params = [];
 
+    /** @var \PDO $connect */
+    private $connect = null;
+
+    /**
+     * Connect to MySQL
+     *
+     * @return $this
+     */
+    public function connect(): object
+    {
+        //Connect if NOT connected
+        if (is_null($this->connect)) {
+            $this->connect = parent::connect();
+        }
+
+        return $this;
+    }
+
     /**
      * Insert into table
      *
@@ -296,7 +314,7 @@ class pdo_mysql extends pdo
     public function exec(string $sql): int
     {
         try {
-            if (false === $exec = parent::connect()->exec($sql)) {
+            if (false === $exec = $this->connect->exec($sql)) {
                 $exec = -1;
             }
         } catch (\Throwable $throwable) {
@@ -320,8 +338,8 @@ class pdo_mysql extends pdo
     {
         try {
             $stmt = !$fetch_col
-                ? parent::connect()->query($sql, \PDO::FETCH_ASSOC)
-                : parent::connect()->query($sql, \PDO::FETCH_COLUMN, $col_no);
+                ? $this->connect->query($sql, \PDO::FETCH_ASSOC)
+                : $this->connect->query($sql, \PDO::FETCH_COLUMN, $col_no);
         } catch (\Throwable $throwable) {
             throw new \PDOException('SQL: ' . $sql . '. ' . PHP_EOL . 'Error:' . $throwable->getMessage(), E_USER_ERROR);
         }
@@ -344,8 +362,8 @@ class pdo_mysql extends pdo
         $sql = $this->build_sql();
 
         try {
-            $stmt = parent::connect()->prepare($sql);
-            $stmt->execute($this->params['bind_value']);
+            $stmt = $this->connect->prepare($sql);
+            $stmt->execute($this->params['bind_value'] ?? null);
             $this->params = [];
         } catch (\Throwable $throwable) {
             throw new \PDOException('SQL: ' . $sql . '. ' . PHP_EOL . 'Error:' . $throwable->getMessage(), E_USER_ERROR);
@@ -367,8 +385,8 @@ class pdo_mysql extends pdo
         $sql = $this->build_sql();
 
         try {
-            $stmt         = parent::connect()->prepare($sql);
-            $result       = $stmt->execute($this->params['bind_value']);
+            $stmt         = $this->connect->prepare($sql);
+            $result       = $stmt->execute($this->params['bind_value'] ?? null);
             $this->params = [];
         } catch (\Throwable $throwable) {
             throw new \PDOException('SQL: ' . $sql . '. ' . PHP_EOL . 'Error:' . $throwable->getMessage(), E_USER_ERROR);
@@ -387,7 +405,7 @@ class pdo_mysql extends pdo
      */
     public function last_insert(string $name = ''): int
     {
-        return (int)parent::connect()->lastInsertId('' === $name ? null : $name);
+        return (int)$this->connect->lastInsertId('' === $name ? null : $name);
     }
 
     /**
@@ -397,7 +415,7 @@ class pdo_mysql extends pdo
      */
     public function begin(): bool
     {
-        return parent::connect()->beginTransaction();
+        return $this->connect->beginTransaction();
     }
 
     /**
@@ -407,7 +425,7 @@ class pdo_mysql extends pdo
      */
     public function commit(): bool
     {
-        return parent::connect()->commit();
+        return $this->connect->commit();
     }
 
     /**
@@ -417,7 +435,7 @@ class pdo_mysql extends pdo
      */
     public function rollback(): bool
     {
-        return parent::connect()->rollBack();
+        return $this->connect->rollBack();
     }
 
     /**
@@ -429,7 +447,7 @@ class pdo_mysql extends pdo
      */
     private function rand_key(string $key): string
     {
-        return ':' . $key . '_' . substr(hash('md5', uniqid(mt_rand(), true)), 0, 4);
+        return ':' . strtr($key, '.', '_') . '_' . substr(hash('md5', uniqid(mt_rand(), true)), 0, 4);
     }
 
     /**
@@ -441,7 +459,13 @@ class pdo_mysql extends pdo
     private function set_action(string $action, string $table): void
     {
         if ('' === $table) {
-            $table = strtr(get_class($this), '\\', '_');
+            $table = get_class($this);
+
+            if (false !== $pos = strrpos($table, '\\')) {
+                $table = substr($table, $pos + 1);
+            }
+
+            unset($pos);
         }
 
         $this->params['action'] = &$action;
@@ -559,89 +583,6 @@ class pdo_mysql extends pdo
 
         unset($list);
         return $field;
-    }
-
-    /**
-     * Build where conditions
-     * Complex condition compatible
-     *
-     * @param array  $values
-     * @param string $refer_key
-     *
-     * @return string
-     */
-    private function build_condition(array $values, string $refer_key): string
-    {
-        $condition = '';
-        $param_key = 'bind_' . $refer_key;
-
-        foreach ($values as $value) {
-            if (in_array($item = strtoupper($value[0]), ['AND', '&&', 'OR', '||', 'XOR', '&', '~', '|', '^'], true)) {
-                array_shift($value);
-                $condition .= $item . ' ';
-            } elseif ('' !== $condition || isset($this->params[$refer_key])) {
-                $condition .= 'AND ';
-            }
-
-            $condition .= $this->escape($value[0]) . ' ';
-
-            if (3 === count($value)) {
-                if (!in_array($item = strtoupper($value[1]), ['=', '<', '>', '<=', '>=', '<>', '!=', 'LIKE', 'IN', 'NOT IN', 'BETWEEN'], true)) {
-                    throw new \PDOException('Incorrect operator: "' . $value[1] . '"!', E_USER_ERROR);
-                }
-
-                $condition .= $item . ' ';
-
-                if (!is_array($value[2])) {
-                    $bind_key  = $this->rand_key($value[0]);
-                    $condition .= $bind_key . ' ';
-
-                    $this->params[$param_key][$bind_key] = &$value[2];
-                } elseif ('BETWEEN' !== $item) {
-                    $bind_keys = [];
-
-                    foreach ($value[2] as $val) {
-                        $bind_keys[] = $bind_key = $this->rand_key($value[0]);
-
-                        $this->params[$param_key][$bind_key] = $val;
-                    }
-
-                    $condition .= '(' . implode(', ', $bind_keys) . ') ';
-                } else {
-                    $bind_keys = [];
-
-                    foreach ($value[2] as $val) {
-                        $bind_keys[] = $bind_key = $this->rand_key($value[0]);
-
-                        $this->params[$param_key][$bind_key] = $val;
-                    }
-
-                    $condition .= implode(' AND ', $bind_keys) . ' ';
-                }
-            } elseif (!is_array($value[1])) {
-                if (!in_array($item = strtoupper($value[1]), ['IS NULL', 'IS NOT NULL'], true)) {
-                    $bind_key  = $this->rand_key($value[0]);
-                    $condition .= '= ' . $bind_key . ' ';
-
-                    $this->params[$param_key][$bind_key] = &$value[1];
-                } else {
-                    $condition .= $item . ' ';
-                }
-            } else {
-                $bind_keys = [];
-
-                foreach ($value[1] as $val) {
-                    $bind_keys[] = $bind_key = $this->rand_key($value[0]);
-
-                    $this->params[$param_key][$bind_key] = $val;
-                }
-
-                $condition .= 'IN (' . implode(', ', $bind_keys) . ') ';
-            }
-        }
-
-        unset($values, $refer_key, $param_key, $value, $item, $bind_key, $bind_keys, $val);
-        return $condition;
     }
 
     /**
@@ -772,5 +713,88 @@ class pdo_mysql extends pdo
         }
 
         return $sql;
+    }
+
+    /**
+     * Build where conditions
+     * Complex condition compatible
+     *
+     * @param array  $values
+     * @param string $refer_key
+     *
+     * @return string
+     */
+    private function build_condition(array $values, string $refer_key): string
+    {
+        $condition = '';
+        $param_key = 'bind_' . $refer_key;
+
+        foreach ($values as $value) {
+            if (in_array($item = strtoupper($value[0]), ['AND', '&&', 'OR', '||', 'XOR', '&', '~', '|', '^'], true)) {
+                array_shift($value);
+                $condition .= $item . ' ';
+            } elseif ('' !== $condition || isset($this->params[$refer_key])) {
+                $condition .= 'AND ';
+            }
+
+            $condition .= $this->escape($value[0]) . ' ';
+
+            if (3 === count($value)) {
+                if (!in_array($item = strtoupper($value[1]), ['=', '<', '>', '<=', '>=', '<>', '!=', 'LIKE', 'IN', 'NOT IN', 'BETWEEN'], true)) {
+                    throw new \PDOException('Incorrect operator: "' . $value[1] . '"!', E_USER_ERROR);
+                }
+
+                $condition .= $item . ' ';
+
+                if (!is_array($value[2])) {
+                    $bind_key  = $this->rand_key($value[0]);
+                    $condition .= $bind_key . ' ';
+
+                    $this->params[$param_key][$bind_key] = $value[2];
+                } elseif ('BETWEEN' !== $item) {
+                    $bind_keys = [];
+
+                    foreach ($value[2] as $val) {
+                        $bind_keys[] = $bind_key = $this->rand_key($value[0]);
+
+                        $this->params[$param_key][$bind_key] = $val;
+                    }
+
+                    $condition .= '(' . implode(', ', $bind_keys) . ') ';
+                } else {
+                    $bind_keys = [];
+
+                    foreach ($value[2] as $val) {
+                        $bind_keys[] = $bind_key = $this->rand_key($value[0]);
+
+                        $this->params[$param_key][$bind_key] = $val;
+                    }
+
+                    $condition .= implode(' AND ', $bind_keys) . ' ';
+                }
+            } elseif (!is_array($value[1])) {
+                if (!in_array($item = strtoupper($value[1]), ['IS NULL', 'IS NOT NULL'], true)) {
+                    $bind_key  = $this->rand_key($value[0]);
+                    $condition .= '= ' . $bind_key . ' ';
+
+                    $this->params[$param_key][$bind_key] = $value[1];
+                } else {
+                    $condition .= $item . ' ';
+                }
+            } else {
+                $bind_keys = [];
+
+                foreach ($value[1] as $val) {
+                    $bind_keys[] = $bind_key = $this->rand_key($value[0]);
+
+                    $this->params[$param_key][$bind_key] = $val;
+                }
+
+                $condition .= 'IN (' . implode(', ', $bind_keys) . ') ';
+            }
+        }
+
+        unset($values, $refer_key, $param_key, $value, $item, $bind_key, $bind_keys, $val);
+        return $condition;
     }
 }

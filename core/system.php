@@ -20,6 +20,26 @@
 
 namespace core;
 
+//Require PHP version >= 7.2.0
+if (version_compare(PHP_VERSION, '7.2.0', '<')) {
+    exit('NervSys needs PHP 7.2.0 or higher!');
+}
+
+//Define NervSys version
+define('VER', '7.2.20');
+
+//Define absolute root path
+define('ROOT', substr(strtr(__DIR__, ['/' => DIRECTORY_SEPARATOR, '\\' => DIRECTORY_SEPARATOR]) . DIRECTORY_SEPARATOR, 0, -5));
+
+//Register autoload function
+spl_autoload_register(
+    static function (string $class): void
+    {
+        require (false !== strpos($class, '\\') ? ROOT . strtr($class, '\\', DIRECTORY_SEPARATOR) : $class) . '.php';
+        unset($class);
+    }
+);
+
 use core\handler\error;
 use core\handler\operator;
 use core\handler\platform;
@@ -28,44 +48,168 @@ use core\parser\cmd;
 use core\parser\input;
 use core\parser\output;
 
-use core\pool\command;
+//Register error handler
+register_shutdown_function([error::class, 'shutdown_handler']);
+set_exception_handler([error::class, 'exception_handler']);
+set_error_handler([error::class, 'error_handler']);
 
-class system extends command
+//Config environment
+system::load_cfg();
+system::init_env();
+
+/**
+ * Class system
+ *
+ * @package core
+ */
+class system
 {
+    //Log path
+    const LOG_PATH = ROOT . 'logs' . DIRECTORY_SEPARATOR;
+
+    //Configuration file
+    const CFG_FILE = ROOT . 'core' . DIRECTORY_SEPARATOR . 'system.ini';
+
+    //Running stage codes
+    const STAGE_INIT  = 1;
+    const STAGE_READ  = 2;
+    const STAGE_EXEC  = 3;
+    const STAGE_FLUSH = 4;
+
+    //Process pool
+    public static $logs   = '';
+    public static $data   = [];
+    public static $error  = [];
+    public static $result = [];
+
+    //Runtime values
+    public static $cmd    = '';
+    public static $mime   = '';
+    public static $is_CLI = true;
+    public static $is_TLS = true;
+
+    //System settings
+    protected static $sys  = [];
+    protected static $log  = [];
+    protected static $cgi  = [];
+    protected static $cli  = [];
+    protected static $cors = [];
+    protected static $init = [];
+    protected static $load = [];
+    protected static $path = [];
+
+    //Parsed cmd & params
+    protected static $cmd_cgi   = [];
+    protected static $cmd_cli   = [];
+    protected static $param_cgi = [];
+    protected static $param_cli = ['argv' => [], 'pipe' => '', 'time' => 0, 'ret' => false];
+
+    //Error reporting level
+    protected static $err_lv = E_ALL | E_STRICT;
+
+    /**
+     * Load configurations
+     */
+    public static function load_cfg(): void
+    {
+        //Parse configuration file
+        $conf = parse_ini_file(self::CFG_FILE, true, INI_SCANNER_TYPED);
+
+        //Set include path
+        if (!empty($conf['PATH'])) {
+            $conf['PATH'] = array_map(
+                static function (string $path): string
+                {
+                    $path = rtrim(strtr($path, ['/' => DIRECTORY_SEPARATOR, '\\' => DIRECTORY_SEPARATOR]), DIRECTORY_SEPARATOR);
+
+                    if (0 !== strpos($path, '/') && 1 !== strpos($path, ':')) {
+                        $path = ROOT . $path;
+                    }
+
+                    return $path . DIRECTORY_SEPARATOR;
+                }, $conf['PATH']
+            );
+
+            set_include_path(implode(PATH_SEPARATOR, $conf['PATH']));
+        }
+
+        //Set setting values
+        foreach ($conf as $key => $val) {
+            $key = strtolower($key);
+
+            if (isset(self::$$key)) {
+                self::$$key = $val;
+            }
+        }
+
+        //Refill app_path
+        if ('' !== self::$sys['app_path']) {
+            self::$sys['app_path'] = trim(self::$sys['app_path'], " /\\\t\n\r\0\x0B") . '/';
+        }
+
+        unset($conf, $key, $val);
+    }
+
+    /**
+     * Initialize environment values
+     */
+    public static function init_env(): void
+    {
+        //Set runtime values
+        set_time_limit(0);
+        ignore_user_abort(true);
+        error_reporting(self::$err_lv);
+        date_default_timezone_set('' !== self::$sys['timezone'] ? self::$sys['timezone'] : 'UTC');
+
+        //Set running mode
+        self::$is_CLI = 'cli' === PHP_SAPI;
+
+        //Set TLS protocol
+        self::$is_TLS = (isset($_SERVER['HTTPS']) && 'on' === $_SERVER['HTTPS'])
+            || (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && 'https' === $_SERVER['HTTP_X_FORWARDED_PROTO']);
+    }
+
     /**
      * Boot system
      *
-     * @param int $state
+     * @param int $stage
      */
-    public static function boot(int $state = 0): void
+    public static function boot(int $stage = self::STAGE_FLUSH): void
     {
         /**
-         * Prepare state (S1)
+         * INIT stage (S1)
          * Initialize system
          *
          * Steps:
-         * 1. Load "system.ini" and parse settings.
-         * 2. Set runtime values, detect CGI/CLI and TLS.
-         * 3. Check Cross-Origin Resource Sharing (CORS) permissions.
-         * 4. Execute all configured settings in "init" section of "system.ini".
-         * 5. Read and parse input data. Save to process pool in non-overwrite mode.
+         * 1. Check Cross-Origin Resource Sharing (CORS) permissions.
+         * 2. Execute all configured settings in "init" section of "system.ini".
          */
+        self::validate_cors();
+        self::initialize_sys();
 
-        self::load_cfg();
-        self::config_env();
-        self::check_cors();
-        self::initial_sys();
-
-        input::read();
-
-        //S1 exit control
-        if (1 === $state) {
+        //S1 stage abort
+        if ($stage === self::STAGE_INIT) {
             return;
         }
 
         /**
-         * Process state (S2)
-         * Execute commands and gather results
+         * READ stage (S2)
+         * Read & parse input data
+         *
+         * Steps:
+         * 1. Read and parse input data (REQUEST + JSON + XML).
+         * 2. Save parsed data to process pool in non-overwrite mode.
+         */
+        input::read();
+
+        //S2 stage abort
+        if ($stage === self::STAGE_READ) {
+            return;
+        }
+
+        /**
+         * EXEC stage (S3)
+         * Execute input commands
          *
          * Steps:
          * 1. Prepare commands. Skip when already set.
@@ -73,30 +217,26 @@ class system extends command
          * 3. Execute script functions and external commands via CLI mode (available under CLI).
          * 4. Gathering results on calling every function or external command. Save to process result pool.
          */
-
-        '' !== parent::$cmd && cmd::prepare();
+        '' !== self::$cmd && cmd::prepare();
 
         operator::exec_cgi();
         operator::exec_cli();
 
-        //S2 exit control
-        if (2 === $state) {
+        //S3 stage abort
+        if ($stage === self::STAGE_EXEC) {
             return;
         }
 
         /**
-         * Flush state (S3)
+         * FLUSH stage (S4, default)
          * Output results in preset format
          *
          * Steps:
          * 1. Output MIME-Type header.
-         * 2. Reduce array result on single command.
-         * 3. Output result content according to preset format.
+         * 2. Output formatted result content.
          */
-
         output::flush();
-
-        unset($state);
+        unset($stage);
     }
 
     /**
@@ -104,44 +244,47 @@ class system extends command
      */
     public static function stop(): void
     {
-        output::flush() && exit;
+        output::flush();
+        exit;
     }
 
     /**
      * Get IP
      *
+     * @param bool $allow_proxy
+     *
      * @return string
      */
-    public static function get_ip(): string
+    public static function get_ip(bool $allow_proxy = false): string
     {
-        //IP check list
-        $chk_list = [
-            'HTTP_CLIENT_IP',
-            'HTTP_X_FORWARDED_FOR',
-            'HTTP_X_FORWARDED',
-            'HTTP_FORWARDED_FOR',
-            'HTTP_FORWARDED',
-            'REMOTE_ADDR'
-        ];
+        //Get remote IP
+        $remote_ip = $_SERVER['REMOTE_ADDR'];
 
-        //Check ip values
-        foreach ($chk_list as $key) {
-            if (!isset($_SERVER[$key])) {
-                continue;
+        //Check forwarded IP
+        if (isset($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+            //Get forwarded IP list
+            $forward_ip = array_map(
+                static function (string $ip): string
+                {
+                    return trim($ip);
+                }, false !== strpos($_SERVER['HTTP_X_FORWARDED_FOR'], ',')
+                ? explode(',', $_SERVER['HTTP_X_FORWARDED_FOR'])
+                : [$_SERVER['HTTP_X_FORWARDED_FOR']]
+            );
+
+            //Check remote IP with last proxy IP
+            if ($remote_ip !== array_pop($forward_ip) || empty($forward_ip)) {
+                //High anonymity proxy detected
+                return $allow_proxy ? $remote_ip : '';
             }
 
-            $ip_list = false !== strpos($_SERVER[$key], ',') ? explode(',', $_SERVER[$key]) : [$_SERVER[$key]];
-
-            foreach ($ip_list as $ip) {
-                if (false !== $ip = filter_var(trim($ip), FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 | FILTER_FLAG_IPV6)) {
-                    unset($chk_list, $key, $ip_list);
-                    return $ip;
-                }
-            }
+            //Copy remote IP
+            $remote_ip = array_shift($forward_ip);
+            unset($forward_ip);
         }
 
-        unset($chk_list, $key, $ip_list, $ip);
-        return '0.0.0.0';
+        //Validate IP address (IPV4 & IPV6)
+        return (string)filter_var($remote_ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 | FILTER_FLAG_IPV6);
     }
 
     /**
@@ -153,7 +296,6 @@ class system extends command
     public static function add_cgi(string $class, string ...$method): void
     {
         self::$cmd_cgi[] = func_get_args();
-
         unset($class, $method);
     }
 
@@ -198,106 +340,30 @@ class system extends command
         }
 
         self::$cmd_cli[] = &$cmd_cli;
-
         unset($cmd, $argv, $pipe, $time, $ret, $cmd_cli);
     }
 
     /**
-     * Build dependency list
+     * Get relative cmd based on app_path
      *
-     * @param array $dep_list
-     */
-    protected static function build_dep(array &$dep_list): void
-    {
-        foreach ($dep_list as $key => $dep) {
-            //Parse dependency
-            if (false === strpos($dep, '-')) {
-                $order  = $dep;
-                $method = '__construct';
-            } else {
-                list($order, $method) = explode('-', $dep, 2);
-            }
-
-            //Rebuild list
-            $dep_list[$key] = [$order, self::build_name($order), $method];
-        }
-
-        unset($key, $dep, $order, $method);
-    }
-
-    /**
-     * Build class name
-     *
-     * @param string $class
+     * @param string $cmd
      *
      * @return string
      */
-    protected static function build_name(string $class): string
+    public static function get_app_cmd(string $cmd): string
     {
-        return '\\' . trim(strtr($class, '/', '\\'), '\\');
-    }
-
-    /**
-     * Load configuration settings
-     */
-    private static function load_cfg(): void
-    {
-        //Load configuration file
-        $conf = parse_ini_file(parent::CFG_FILE, true);
-
-        //Set include path
-        if (isset($conf['PATH']) && !empty($conf['PATH'])) {
-            $conf['PATH'] = array_map(
-                static function (string $path): string
-                {
-                    $path = rtrim(strtr($path, ['/' => DIRECTORY_SEPARATOR, '\\' => DIRECTORY_SEPARATOR]), DIRECTORY_SEPARATOR);
-
-                    if (0 !== strpos($path, '/') && 1 !== strpos($path, ':')) {
-                        $path = ROOT . $path;
-                    }
-
-                    return $path . DIRECTORY_SEPARATOR;
-                }, $conf['PATH']
-            );
-
-            set_include_path(implode(PATH_SEPARATOR, $conf['PATH']));
+        //Remove defined "app_path"
+        if ('' !== self::$sys['app_path'] && 0 === strpos($cmd, self::$sys['app_path'])) {
+            $cmd = substr($cmd, strlen(self::$sys['app_path']));
         }
 
-        //Set setting values
-        foreach ($conf as $key => $val) {
-            $key = strtolower($key);
-
-            if (isset(self::$$key)) {
-                self::$$key = $val;
-            }
-        }
-
-        unset($conf, $key, $val);
+        return $cmd;
     }
 
     /**
-     * Load environment values
+     * Validate CORS permissions
      */
-    private static function config_env(): void
-    {
-        //Set runtime values
-        set_time_limit(0);
-        ignore_user_abort(true);
-        error_reporting(self::$err_lv);
-        date_default_timezone_set(self::$sys['timezone']);
-
-        //Detect running mode
-        self::$is_CLI = 'cli' === PHP_SAPI;
-
-        //Detect TLS protocol
-        self::$is_TLS = (isset($_SERVER['HTTPS']) && 'on' === $_SERVER['HTTPS'])
-            || (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && 'https' === $_SERVER['HTTP_X_FORWARDED_PROTO']);
-    }
-
-    /**
-     * Check CORS permissions
-     */
-    private static function check_cors(): void
+    private static function validate_cors(): void
     {
         //Check settings and ENV
         if (empty(self::$cors)
@@ -316,14 +382,13 @@ class system extends command
 
         //Exit on OPTION request
         'OPTIONS' === $_SERVER['REQUEST_METHOD'] && exit;
-
         unset($allow_headers);
     }
 
     /**
      * Initialize system
      */
-    private static function initial_sys(): void
+    private static function initialize_sys(): void
     {
         if (empty(self::$init)) {
             return;
@@ -335,10 +400,9 @@ class system extends command
         }
 
         try {
-            //Execute "init" settings
+            //Execute dependency
             operator::exec_dep($list);
         } catch (\Throwable $throwable) {
-            //Redirect exception code to error
             error::exception_handler(new \Exception($throwable->getMessage(), E_USER_ERROR));
             unset($throwable);
         }

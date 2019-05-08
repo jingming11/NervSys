@@ -39,6 +39,9 @@ class input extends system
     {
         //Read data
         if (!parent::$is_CLI) {
+            //Read CMD from URL
+            self::read_url_cmd();
+
             //Read HTTP & input
             self::read_http();
             self::read_raw();
@@ -52,7 +55,7 @@ class input extends system
             && !empty($val = self::opt_val(parent::$data, self::CMD))
             && is_string($val['data'])
         ) {
-            parent::$cmd = &$val['data'];
+            parent::$cmd = $val['data'];
         }
 
         //Read MIME type
@@ -60,10 +63,42 @@ class input extends system
             && !empty($val = self::opt_val(parent::$data, self::MIME))
             && is_string($val['data'])
         ) {
-            parent::$mime = &$val['data'];
+            parent::$mime = $val['data'];
         }
 
         unset($val);
+    }
+
+    /**
+     * Read CMD from URL
+     */
+    private static function read_url_cmd(): void
+    {
+        //Check setting
+        if (true !== parent::$sys['cmd_in_url']) {
+            return;
+        }
+
+        //Read from PATH_INFO
+        if (isset($_SERVER['PATH_INFO']) && 1 < strlen($_SERVER['PATH_INFO'])) {
+            parent::$data['cmd'] = substr($_SERVER['PATH_INFO'], 1);
+            return;
+        }
+
+        //Read from REQUEST_URI
+        if (false === $from = strpos($_SERVER['REQUEST_URI'], '/', 1)) {
+            return;
+        }
+
+        if (false === $stop = strpos($_SERVER['REQUEST_URI'], '?')) {
+            $stop = strlen($_SERVER['REQUEST_URI']);
+        }
+
+        if (1 < $len = $stop - $from) {
+            parent::$data['cmd'] = substr($_SERVER['REQUEST_URI'], $from + 1, $len);
+        }
+
+        unset($from, $stop, $len);
     }
 
     /**
@@ -114,60 +149,6 @@ class input extends system
     }
 
     /**
-     * Read OPTION data
-     *
-     * @return int
-     */
-    private static function read_opt(): int
-    {
-        /**
-         * CLI options
-         *
-         * r/ret: Return option (Available in CLI executable mode only)
-         * c/cmd: System commands (separated by "-" when multiple)
-         * m/mime: Output MIME type (json/xml/html, default: json, available when "r/ret" is set)
-         * d/data: CLI Data package (Transfer to CGI progress)
-         * p/pipe: CLI pipe data package (Transfer to CLI programs)
-         * t/time: CLI read timeout (in microsecond, default: 0, wait till done)
-         */
-        //Get options
-        if (empty($opt = getopt('c:m:d:p:t:r', ['cmd:', 'mime:', 'data:', 'pipe:', 'time:', 'ret'], $optind))) {
-            return $optind;
-        }
-
-        //Get return option
-        parent::$param_cli['ret'] = !empty(self::opt_val($opt, self::RET));
-
-        //Get CMD value
-        if (!empty($val = self::opt_val($opt, self::CMD)) && is_string($val['data'])) {
-            parent::$data += [$val['key'] => data::decode($val['data'])];
-        }
-
-        //Get MIME type
-        if (!empty($val = self::opt_val($opt, self::MIME)) && is_string($val['data'])) {
-            parent::$data += [$val['key'] => &$val['data']];
-        }
-
-        //Get CGI data value
-        if (!empty($val = self::opt_val($opt, self::DATA)) && is_string($val['data'])) {
-            parent::$data += self::opt_data($val['data']);
-        }
-
-        //Get pipe data value
-        if (!empty($val = self::opt_val($opt, self::PIPE)) && is_string($val['data'])) {
-            parent::$param_cli['pipe'] = data::decode($val['data']);
-        }
-
-        //Get pipe timeout value
-        if (!empty($val = self::opt_val($opt, self::TIME))) {
-            parent::$param_cli['time'] = (int)$val['data'];
-        }
-
-        unset($opt, $val);
-        return $optind;
-    }
-
-    /**
      * Read argument data
      *
      * @param int $optind
@@ -208,6 +189,59 @@ class input extends system
 
         unset($keys, $key);
         return [];
+    }
+
+    /**
+     * Read OPTION data
+     *
+     * @return int
+     */
+    private static function read_opt(): int
+    {
+        /**
+         * CLI options
+         *
+         * r/ret: Return option (Available in CLI executable mode only)
+         * c/cmd: System commands (separated by "-" when multiple)
+         * m/mime: Output MIME type (json/xml/html, default: json, available when "r/ret" is set)
+         * d/data: CLI Data package (Transfer to CGI progress)
+         * p/pipe: CLI pipe data package (Transfer to CLI programs)
+         * t/time: CLI read timeout (in microsecond, default: 0, wait till done)
+         */
+        if (empty($opt = getopt('c:m:d:p:t:r', ['cmd:', 'mime:', 'data:', 'pipe:', 'time:', 'ret'], $optind))) {
+            return $optind;
+        }
+
+        //Get return option
+        parent::$param_cli['ret'] = !empty(self::opt_val($opt, self::RET));
+
+        //Get CMD value
+        if (!empty($val = self::opt_val($opt, self::CMD)) && is_string($val['data'])) {
+            parent::$data += [$val['key'] => data::decode($val['data'])];
+        }
+
+        //Get MIME type
+        if (!empty($val = self::opt_val($opt, self::MIME)) && is_string($val['data'])) {
+            parent::$data += [$val['key'] => $val['data']];
+        }
+
+        //Get CGI data value
+        if (!empty($val = self::opt_val($opt, self::DATA)) && is_string($val['data'])) {
+            parent::$data += self::opt_data($val['data']);
+        }
+
+        //Get pipe data value
+        if (!empty($val = self::opt_val($opt, self::PIPE)) && is_string($val['data'])) {
+            parent::$param_cli['pipe'] = data::decode($val['data']);
+        }
+
+        //Get pipe timeout value
+        if (!empty($val = self::opt_val($opt, self::TIME))) {
+            parent::$param_cli['time'] = (int)$val['data'];
+        }
+
+        unset($opt, $val);
+        return $optind;
     }
 
     /**

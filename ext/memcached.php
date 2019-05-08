@@ -1,5 +1,4 @@
 <?php
-
 /**
  * Memcached Connector Extension
  *
@@ -39,7 +38,7 @@ class memcached extends factory
      *
      * @return \Memcached
      */
-    public function connect(): \Memcached
+    public function connect(): object
     {
         //Check connection pool
         if (isset(self::$pool[$key = hash('crc32b', json_encode([$this->host, $this->port, $this->prefix, $this->compress]))])) {
@@ -47,7 +46,6 @@ class memcached extends factory
         }
 
         $memcached = parent::obtain('Memcached');
-
         $memcached->addServer($this->host, $this->port);
         $memcached->setOption(\Memcached::OPT_COMPRESSION, $this->compress);
         $memcached->setOption(\Memcached::OPT_CONNECT_TIMEOUT, $this->timeout * 1000);
@@ -67,15 +65,15 @@ class memcached extends factory
      *
      * @param string $key
      *
-     * @return string
+     * @return mixed|null
      */
-    public function get(string $key): string
+    public function get(string $key)
     {
         $memcached = $this->connect();
         $cache     = $memcached->get($this->prefix . $key);
 
         if ($memcached->getResultCode() === \Memcached::RES_NOTFOUND) {
-            $cache = '';
+            $cache = null;
         }
 
         return $cache;
@@ -85,15 +83,80 @@ class memcached extends factory
      * Set cache
      *
      * @param string $key
+     * @param        $value
+     * @param int    $expiration
+     *
+     * @return bool
+     */
+    public function set(string $key, $value, int $expiration = 0): bool
+    {
+        return $this->connect()->set($this->prefix . $key, $value, $expiration);
+    }
+
+    /**
+     * Append data to an existing string item
+     *
+     * @param string $key
      * @param string $value
      *
      * @return bool
      */
-    public function set(string $key, string $value): bool
+    public function append(string $key, string $value): bool
     {
-        $result = $this->connect()->set($this->prefix . $key, $value);
+        return $this->connect()->append($this->prefix . $key, $value);
+    }
 
-        unset($key, $value);
-        return $result;
+    /**
+     * Prepend data to an existing string item
+     *
+     * @param string $key
+     * @param string $value
+     *
+     * @return bool
+     */
+    public function prepend(string $key, string $value): bool
+    {
+        return $this->connect()->prepend($this->prefix . $key, $value);
+    }
+
+    /**
+     * Delete cache
+     *
+     * @param string $key
+     *
+     * @return bool
+     */
+    public function delete(string $key): bool
+    {
+        return $this->connect()->delete($this->prefix . $key);
+    }
+
+    /**
+     * decrement
+     * Notice:  The element must be numeric
+     *          If the operation would decrease the value below 0, the new value will be 0.
+     *
+     * @param string $key
+     * @param int    $offset
+     *
+     * @return int
+     */
+    public function decrement(string $key, int $offset = 1): int
+    {
+        return $this->connect()->decrement($this->prefix . $key, $offset);
+    }
+
+    /**
+     * increment
+     * Notice:  The element must be numeric
+     *
+     * @param string $key
+     * @param int    $offset
+     *
+     * @return int
+     */
+    public function increment(string $key, int $offset = 1): int
+    {
+        return $this->connect()->increment($this->prefix . $key, $offset);
     }
 }

@@ -123,7 +123,7 @@ class data
         //Process param data
         foreach ($params as $param) {
             if (isset($input[$name = $param->getName()])) {
-                switch ($param->getType()) {
+                switch (is_object($type = $param->getType()) ? $type->getName() : 'undefined') {
                     case 'int':
                         is_numeric($input[$name]) ? $data[] = (int)$input[$name] : $diff[] = $name;
                         break;
@@ -137,7 +137,7 @@ class data
                         is_array($input[$name]) || is_object($input[$name]) ? $data[] = (array)$input[$name] : $diff[] = $name;
                         break;
                     case 'string':
-                        is_string($input[$name]) || is_numeric($input[$name]) ? $data[] = (string)$input[$name] : $diff[] = $name;
+                        is_string($input[$name]) || is_numeric($input[$name]) ? $data[] = trim((string)$input[$name]) : $diff[] = $name;
                         break;
                     case 'object':
                         is_object($input[$name]) || is_array($input[$name]) ? $data[] = (object)$input[$name] : $diff[] = $name;
@@ -155,8 +155,7 @@ class data
         if (!empty($diff)) {
             throw new \Exception(
                 $reflect->getDeclaringClass()->getName() . '::' . $reflect->getName()
-                . ': Argument mismatch [' . (implode(', ', $diff)) . ']',
-                E_USER_WARNING
+                . ': Argument mismatch [' . (implode(', ', $diff)) . ']'
             );
         }
 

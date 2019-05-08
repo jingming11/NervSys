@@ -21,6 +21,7 @@
 namespace core\handler;
 
 use core\parser\data;
+
 use core\parser\trustzone;
 
 class operator extends factory
@@ -57,7 +58,7 @@ class operator extends factory
 
             //Get module name
             if (false !== strpos($module = strtr($name, '\\', '/'), '/')) {
-                $module = strstr($module, '/', true);
+                $module = strstr(parent::get_app_cmd($module), '/', true);
             }
 
             try {
@@ -209,22 +210,6 @@ class operator extends factory
     }
 
     /**
-     * Build mapped key
-     *
-     * @param string $class
-     * @param string $method
-     *
-     * @return string
-     */
-    private static function build_key(string $class, string $method): string
-    {
-        $key = parent::$param_cgi[$class . '-' . $method] ?? (parent::$param_cgi[$class] ?? $class) . '/' . $method;
-
-        unset($class, $method);
-        return $key;
-    }
-
-    /**
      * Build method caller
      *
      * @param string $order
@@ -236,7 +221,12 @@ class operator extends factory
     private static function build_caller(string $order, string $class, string $method): void
     {
         //Get reflection
-        $reflect = parent::reflect($class, $method);
+        $reflect = parent::reflect_method($class, $method);
+
+        //Check method visibility
+        if (!$reflect->isPublic()) {
+            throw new \ReflectionException($class . '::' . $method . ': NOT for public!', E_USER_WARNING);
+        }
 
         //Call constructor
         if ('__construct' === $method) {
@@ -248,7 +238,7 @@ class operator extends factory
         //Using class object
         if (!$reflect->isStatic()) {
             $class = method_exists($class, '__construct')
-                ? parent::obtain($class, data::build_argv(parent::reflect($class, '__construct'), parent::$data))
+                ? parent::obtain($class, data::build_argv(parent::reflect_method($class, '__construct'), parent::$data))
                 : parent::obtain($class);
         }
 
@@ -263,6 +253,23 @@ class operator extends factory
         }
 
         unset($order, $class, $method, $reflect, $params, $result);
+    }
+
+    /**
+     * Build mapped key
+     *
+     * @param string $class
+     * @param string $method
+     *
+     * @return string
+     */
+    private static function build_key(string $class, string $method): string
+    {
+        $key = parent::$param_cgi[$class . '-' . $method] ?? (parent::$param_cgi[$class] ?? $class) . '/' . $method;
+        $key = parent::get_app_cmd($key);
+
+        unset($class, $method);
+        return $key;
     }
 
     /**

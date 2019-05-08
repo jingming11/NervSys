@@ -1,6 +1,6 @@
 # Nervsys
 
-Stable version: 7.2.18  
+Stable version: 7.2.20  
 Extension version: 2.0  
 [Unit Test Suites](https://github.com/NervSys/tests)  
   
@@ -49,17 +49,15 @@ PHP 7.2+ and above. Any kind of web server or running under CLI mode.
     │     │       ├─input.php                   input data parser
     │     │       ├─output.php                  output data parser
     │     │       └─trustzone.php               TrustZone data parser
-    │     ├─pool/
-    │     │     ├─command.php                   command data pool
-    │     │     ├─process.php                   process date poll
-    │     │     └─setting.php                   setting data pool
     │     ├─system.ini                          system setting file
     │     └─system.php                          system script file
     ├─ext/
+    │    ├─font/
     │    ├─lib/
     │    │    └─key.php                         keygen interface
     │    ├─crypt.php                            Encrypt/decrypt extension
     │    ├─crypt_img.php                        Auth code image extension from crypt
+    │    ├─doc.php                              API Doc extension
     │    ├─errno.php                            Error code extension
     │    ├─file.php                             Filesystem related IO extension
     │    ├─http.php                             HTTP request extension
@@ -67,6 +65,7 @@ PHP 7.2+ and above. Any kind of web server or running under CLI mode.
     │    ├─keygen.php                           keygen extension for crypt
     │    ├─lang.php                             Language pack extension
     │    ├─memcached.php                        Memcached extension (Thanks to tggtzbh)
+    │    ├─misc.php                             Misc functions
     │    ├─mpc.php                              Multi-Process Controller Extension
     │    ├─pdo.php                              PDO connector extension
     │    ├─pdo_mysql.php                        PDO MySQL extension (Thanks to kristenzz)
@@ -79,7 +78,6 @@ PHP 7.2+ and above. Any kind of web server or running under CLI mode.
     │    ├─socket.php                           Socket extension
     │    ├─upload.php                           Upload extension
     │    └─...
-    ├─font/
     ├─logs/
     └─api.php                                   API entry script
 
@@ -102,13 +100,21 @@ The words above are reserved by NervSys core. So that, they should be taken care
 
 ## Config "system.ini"
 
-"system.ini" locates right under the "core" folder, which contains most of the important setting sections.
+"system.ini" locates right under the "core" folder, which contains most of the important setting sections.  
+Always remember, do NOT delete any entry or section from "system.ini".  
 
 ### SYS
 
     [SYS]
-    Holds system settings
+    ; TimeZone
     timezone = PRC
+    
+    ; Application directory name
+    ; Set to empty if all app folders laying right under root directory
+    app_path = app
+    
+    ; Enable reading "cmd" content from URL
+    cmd_in_url = on
 
 ### LOG
 
@@ -124,9 +130,10 @@ The words above are reserved by NervSys core. So that, they should be taken care
     notice = on
     info = on
     debug = on
-    show = on ; Output logs on screen
     
-    Don't delete these levels, just change the value to "off" or "0", if there is no need to log them.
+    display = on ; Display logs on screen
+    
+    Don't delete these levels, just change the value to "off" or "0", if there is no need to log or display them.
 
 ### CGI
 
@@ -231,6 +238,7 @@ The words above are reserved by NervSys core. So that, they should be taken care
     [LOAD]
     This section works for all.
     This section holds "/subfolder/" startup initial functions.
+    When "app_path" entry was set, sub-folders are related to the "app_path" instead
     
     Example & explain:
     
@@ -415,7 +423,7 @@ $class = class_name::new(arguments, ...)->as('alias_name');
 * Save it under alias name with configurations:  
 $class = class_name::new(arguments, ...)->config(array $settings)->as('alias_name');  
   
-* Get cloned object by its alisa name:  
+* Get cloned object by its alias name:  
 $cloned_class = class_name::new('alias_name');  
   
 * Save an object in the middle way:  
@@ -444,6 +452,11 @@ The values are recorded when API accesses the class for the first time. Never tr
   
 Keys in "$tz": Functions that are exposed to API.  
 Values in "$tz": Control API action to call target function.  
+  
+In "$tz", keys of "pre", "post" and "param" can be combined when needed, actions will be proceeded as follows:  
+1. Execute all preset functions in values of "pre".  
+2. Execute target method according to "param" settings.  
+3. Execute all preset functions in values of "post".  
   
 Functions that are not listed in "$tz" won't be called by API directly.  
   

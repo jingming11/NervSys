@@ -22,9 +22,7 @@ namespace ext;
 
 use ext\lib\key;
 
-use core\handler\factory;
-
-class keygen extends factory implements key
+class keygen implements key
 {
     /**
      * Create Crypt Key
@@ -45,10 +43,10 @@ class keygen extends factory implements key
      */
     public static function extract(string $key): array
     {
-        $keys        = [];
-        $keys['key'] = &$key;
+        $keys = [];
 
-        $keys['iv'] = 0 === ord(substr($key, 0, 1)) & 1
+        $keys['key'] = &$key;
+        $keys['iv']  = 0 === (ord(substr($key, 0, 1)) & 1)
             ? substr($key, 0, 16)
             : substr($key, -16, 16);
 
@@ -70,7 +68,7 @@ class keygen extends factory implements key
         foreach ($unit as $k => $v) {
             $unit_key = substr($v, 0, 1);
 
-            if ($k & 1 !== ord($unit_key) & 1) {
+            if (self::validate_kv($k, $unit_key)) {
                 $v = strrev($v);
             }
 
@@ -97,12 +95,26 @@ class keygen extends factory implements key
         foreach ($unit as $k => $v) {
             $unit_key  = substr($v, -1, 1);
             $unit_item = substr($v, 0, 4);
-            $unit[$k]  = ($k & 1 !== ord($unit_key) & 1) ? strrev($unit_item) : $unit_item;
+
+            $unit[$k] = self::validate_kv($k, $unit_key) ? strrev($unit_item) : $unit_item;
         }
 
         $key = implode($unit);
 
         unset($unit, $k, $v, $unit_key, $unit_item);
         return $key;
+    }
+
+    /**
+     * Validate k & v
+     *
+     * @param int    $k
+     * @param string $v
+     *
+     * @return bool
+     */
+    private static function validate_kv(int $k, string $v): bool
+    {
+        return 0 === ($k & ord($v));
     }
 }

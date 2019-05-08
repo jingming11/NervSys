@@ -29,14 +29,14 @@ class crypt_img extends crypt
     protected $width  = 120;
     protected $height = 40;
 
+    //Length (only works for "num" & "word")
+    protected $length = 6;
+
     //Font filename (stored in "/font/")
     protected $font = 'font.ttf';
 
     //Code type ("": random type, "num", "word", "calc")
     protected $type = '';
-
-    //Length (only works for "num" & "word")
-    const LENGTH = 6;
 
     /**
      * Get Code
@@ -57,7 +57,7 @@ class crypt_img extends crypt
         $codes['code'] = parent::sign(json_encode(['code' => $codes['code'], 'life' => time() + (0 < $this->life ? $this->life : 60)]));
 
         //Image properties
-        $font_file = ROOT . 'font' . DIRECTORY_SEPARATOR . $this->font;
+        $font_file = __DIR__ . DIRECTORY_SEPARATOR . 'font' . DIRECTORY_SEPARATOR . $this->font;
 
         $font_height = (int)($this->height / 1.6);
         $font_width  = (int)($this->width / count($codes['char']));
@@ -185,7 +185,7 @@ class crypt_img extends crypt
     {
         $result = [];
 
-        for ($i = 0; $i < self::LENGTH; ++$i) {
+        for ($i = 0; $i < (int)$this->length; ++$i) {
             $result['char'][] = (string)mt_rand(0, 9);
         }
 
@@ -206,7 +206,7 @@ class crypt_img extends crypt
 
         $list = range('A', 'Z');
 
-        for ($i = 0; $i < self::LENGTH; ++$i) {
+        for ($i = 0; $i < (int)$this->length; ++$i) {
             $result['char'][] = $list[mt_rand(0, 25)];
         }
 

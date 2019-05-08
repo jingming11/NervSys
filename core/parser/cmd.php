@@ -55,6 +55,10 @@ class cmd extends system
 
         foreach ($cmd as $item) {
             if (false !== strpos($item, '/') || false !== strpos($item, '\\')) {
+                //Merge defined app_path
+                $item = parent::$sys['app_path'] . $item;
+
+                //Move group index key
                 ++$key;
             }
 
@@ -77,32 +81,44 @@ class cmd extends system
         //Mapping CGI config
         foreach (parent::$cgi as $name => $item) {
             if (!empty($keys = array_keys($cmd, $name, true))) {
-                //Replace CMD
+                //Full match replace
                 foreach ($keys as $key) {
                     $cmd[$key] = $item;
                 }
 
                 //Add param
                 parent::$param_cgi[$item] = $name;
+
+                unset($keys);
             } else {
+                //Partial match replace
                 foreach ($cmd as $key => $val) {
-                    if (0 !== strpos($val, $name)) {
+                    //Alias name length
+                    $len = strlen($name);
+
+                    //Find match position
+                    $pos = strpos($val, $name);
+
+                    //Skip middle part replace
+                    if (0 !== $pos && strlen($val) !== $pos + $len) {
                         continue;
                     }
 
                     //Replace CMD
-                    $cmd[$key] = substr_replace($val, $item, 0, strlen($name));
+                    $cmd[$key] = substr_replace($val, $item, $pos, $len);
 
                     //Add param
                     parent::$param_cgi[$cmd[$key]] = $val;
                 }
+
+                unset($len, $pos);
             }
         }
 
         //Build CMD
         $cmd = false !== strpos($val = implode('-', $cmd), '-') ? explode('-', $val) : [$val];
 
-        unset($name, $item, $keys, $key, $val);
+        unset($name, $item, $key, $val);
         return $cmd;
     }
 
@@ -112,10 +128,11 @@ class cmd extends system
      * @param array $cmd
      *
      * @return array
+     * @throws \Exception
      */
     private static function prep_cli(array $cmd): array
     {
-        //Check PHP command
+        //Add PHP command
         if (in_array('PHP', $cmd, true)) {
             parent::$cli['PHP'] = platform::php_path();
         }
@@ -129,7 +146,6 @@ class cmd extends system
         $key   = -1;
         $order = [];
 
-        //Mapping CLI config
         foreach ($cmd as $item) {
             if (!isset(parent::$cli[$item]) || '' === parent::$cli[$item]) {
                 continue;

@@ -68,6 +68,23 @@ class error extends system
     ];
 
     /**
+     * Shutdown handler
+     *
+     * @throws \Exception
+     */
+    public static function shutdown_handler(): void
+    {
+        $error = error_get_last();
+
+        if (is_null($error) || 'error' !== self::LEVEL[$error['type']]) {
+            return;
+        }
+
+        self::exception_handler(new \ErrorException($error['message'], $error['type'], $error['type'], $error['file'], $error['line']));
+        unset($error);
+    }
+
+    /**
      * Error handler
      *
      * @param int    $errno
@@ -88,19 +105,6 @@ class error extends system
     }
 
     /**
-     * Shutdown handler
-     *
-     * @throws \Exception
-     */
-    public static function shutdown_handler(): void
-    {
-        if (!is_null($error = error_get_last()) && 'error' === self::LEVEL[$error['type']]) {
-            self::exception_handler(new \ErrorException($error['message'], $error['type'], $error['type'], $error['file'], $error['line']));
-            unset($error);
-        }
-    }
-
-    /**
      * Exception handler
      *
      * @param $throwable
@@ -111,7 +115,7 @@ class error extends system
         $exception = get_class($throwable);
 
         //Get error level
-        $level = isset(self::LEVEL[$throwable->getCode()]) ? self::LEVEL[$throwable->getCode()] : 'warning';
+        $level = self::LEVEL[$throwable->getCode()] ?? 'info';
 
         //Build message
         $message = $exception . ' caught in ' . $throwable->getFile()
@@ -122,17 +126,50 @@ class error extends system
         $context = [
             'Peak: ' . round(memory_get_peak_usage(true) / 1048576, 4) . 'MB',
             'Memory: ' . round(memory_get_usage(true) / 1048576, 4) . 'MB',
-            'Duration: ' . round((microtime(true) - $_SERVER['REQUEST_TIME_FLOAT']) * 1000, 4) . 'ms',
-            'Trace: ' . PHP_EOL . $throwable->getTraceAsString()
+            'Duration: ' . round((microtime(true) - $_SERVER['REQUEST_TIME_FLOAT']) * 1000, 4) . 'ms' . PHP_EOL,
+            //Append param & trace
+            'Param: ' . PHP_EOL . json_encode(['cmd' => parent::$cmd] + parent::$data, 4034) . PHP_EOL,
+            'Trace: ' . PHP_EOL . $throwable->getTraceAsString() . PHP_EOL
         ];
 
-        //Keep logs
+        //Parse backtrace
+        $backtrace = debug_backtrace();
+        $backtrace = array_reverse($backtrace);
+
+        //Check last trace
+        $last_node = end($backtrace);
+
+        //Remove error handler
+        if ($last_node['class'] === __CLASS__) {
+            array_pop($backtrace);
+        }
+
+        //Simplify backtrace records
+        $trace_list = [];
+        foreach ($backtrace as $item) {
+            $msg = '"' . ($item['class'] ?? '') . ($item['type'] ?? '') . $item['function'] . '" called';
+
+            if (isset($item['file'])) {
+                $msg .= ' in "' . $item['file'] . '"';
+            }
+
+            if (isset($item['line'])) {
+                $msg .= ' on line ' . $item['line'];
+            }
+
+            $trace_list[] = $msg;
+        }
+
+        //Append backtrace records
+        $context[] = 'Backtrace: ' . PHP_EOL . implode(PHP_EOL, $trace_list);
+        unset($throwable, $exception, $backtrace, $last_node, $trace_list, $item, $msg);
+
+        //Process logs
         log::$level($message, $context);
-        log::show($level, $message, $context);
+        log::display($level, $message, $context);
 
         //Stop on error
         'error' === $level && parent::stop();
-
-        unset($throwable, $exception, $level, $message, $context);
+        unset($level, $message, $context);
     }
 }

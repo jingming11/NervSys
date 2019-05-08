@@ -20,16 +20,10 @@
 
 namespace ext;
 
-use core\handler\factory;
+use core\system;
 
-class errno extends factory
+class errno
 {
-    //Error message pool
-    private static $pool = [];
-
-    //Multi-language support
-    private static $lang = true;
-
     /**
      * Error file directory
      *
@@ -37,6 +31,12 @@ class errno extends factory
      * Error file should be put in "ROOT/$dir/self::DIR/filename.ini"
      */
     const DIR = 'error';
+
+    //Error message pool
+    private static $pool = [];
+
+    //Multi-language support
+    private static $lang = true;
 
     /**
      * Load error file
@@ -49,7 +49,7 @@ class errno extends factory
     {
         $file = ROOT . $dir . DIRECTORY_SEPARATOR . self::DIR . DIRECTORY_SEPARATOR . $name . '.ini';
 
-        if (is_array($data = parse_ini_file($file, false))) {
+        if (is_array($data = parse_ini_file($file, false, INI_SCANNER_TYPED))) {
             self::$lang = &$lang;
             self::$pool = &$data;
         }
@@ -65,7 +65,7 @@ class errno extends factory
      */
     public static function set(int $code, int $errno = 0): void
     {
-        parent::$error = self::get($code, $errno);
+        system::$error = self::get($code, $errno);
         unset($code, $errno);
     }
 
@@ -80,9 +80,9 @@ class errno extends factory
     public static function get(int $code, int $errno = 0): array
     {
         return [
-            'error' => &$errno,
-            'code'  => &$code,
-            'msg'   => isset(self::$pool[$code])
+            'code'    => &$code,
+            'errno'   => &$errno,
+            'message' => isset(self::$pool[$code])
                 ? (self::$lang ? gettext(self::$pool[$code]) : self::$pool[$code])
                 : 'Error message NOT found!'
         ];
