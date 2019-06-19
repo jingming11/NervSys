@@ -2,6 +2,7 @@
 
 Stable version: 7.2.20  
 Extension version: 2.0  
+[Chinese Documents](https://github.com/NervSys/NervSys/blob/master/README_zh.md)  
 [Unit Test Suites](https://github.com/NervSys/tests)  
   
 Report to us if you encounter an issue.  
@@ -55,6 +56,7 @@ PHP 7.2+ and above. Any kind of web server or running under CLI mode.
     │    ├─font/
     │    ├─lib/
     │    │    └─key.php                         keygen interface
+    │    ├─conf.php                             Config file extension
     │    ├─crypt.php                            Encrypt/decrypt extension
     │    ├─crypt_img.php                        Auth code image extension from crypt
     │    ├─doc.php                              API Doc extension
@@ -79,7 +81,13 @@ PHP 7.2+ and above. Any kind of web server or running under CLI mode.
     │    ├─upload.php                           Upload extension
     │    └─...
     ├─logs/
-    └─api.php                                   API entry script
+    └─api.php                                   API entry script (can be placed into /app or anywhere)
+
+
+## About api.php
+
+"api.php" is the default entry script of Nervsys. But it is only an entry of a site, and can be placed anywhere as needed.  
+We strongly suggest that, create a new entry file under the main app path by modifying the require path, then set the site root to main app path also, to fully avoid exposing project structure to outside.  
 
 
 ## Reserved Words
@@ -115,6 +123,9 @@ Always remember, do NOT delete any entry or section from "system.ini".
     
     ; Enable reading "cmd" content from URL
     cmd_in_url = on
+
+    ; Enable/disable calling functions automatically when no specific function name was given
+    auto_call_mode = on
 
 ### LOG
 
@@ -424,19 +435,22 @@ $class = class_name::new(arguments, ...)->as('alias_name');
 $class = class_name::new(arguments, ...)->config(array $settings)->as('alias_name');  
   
 * Get cloned object by its alias name:  
-$cloned_class = class_name::new('alias_name');  
+$cloned_class = class_name::use('alias_name');  
   
 * Save an object in the middle way:  
-$object->as('alias_name');  
+$object->as('alias_name'); or $object->config(array $settings)->as('alias_name'); 
+  
+* Free from factory:  
+$object->free(); or $object->free('alias_name');  
   
   
 NOTICE: Same ways to call "use" and "obtain" methods, but there are still some small differences:  
   
-**new**: all returned object points to the called class, but in clone mode. Arguments can both be the params for "__construct" method and its alias name.  
+**new**: returned object points to the called class, but in clone mode. Arguments are the params for "__construct" method.  
   
-**use**: all returned object points to the called class, but also points to the original instance, not cloned. Arguments can both be the params for "__construct" method and its alias name.  
+**use**: returned object points to the called class, directly to the original instance saved by "as" method, not cloned. One argument is expected, its alias name.  
   
-**obtain**: all returned object points to the first argument using a class name, with the second argument as the params for "__construct" method. But this method also supports alias calling by passing correct class name and its alias name as the only param in the second argument array.  
+**obtain**: returned object points to a class passed by the first argument as a class name, with the second argument as the params for "__construct" method.  
   
   
 **Caution**:  
@@ -528,7 +542,10 @@ Calling in MULTIPLE class:
 api.php?cmd=DirA/ctr/TestA-DirA/TestB&param_a=xxx&param_b[]=yyy&param_b[]=zzz&param_c=xxx&param_d[]=yyy&param_d[]=zzz  
   
 Result:  
-All functions IN $tz will be looked over. Those ones which qualified both $tz & param checking will be called. All result data package will be put right under corresponding function name keys with class names as prefix. 
+All functions IN $tz will be looked over. Those ones which qualified both $tz & param checking will be called. All result data package will be put right under corresponding function name keys with class names as prefix.  
+
+Notice:  
+This calling method is controlled by "auto_call_mode" setting in "system.ini" for some secure issues.  
 
 
 ## Command Line
@@ -585,6 +602,12 @@ Normally, when php encounters an error, or an exception, it'll stop anyway. But 
 
 [kristenzz](https://github.com/kristemZZ)  
 [tggtzbh](https://github.com/tggtzbh)  
+[xushuhui](https://github.com/xushuhui)  
+
+
+## Supporters
+
+Thanks to [JetBrains](https://www.jetbrains.com/) for supporting the project, within the Open Source Support Program.  
 
 
 ## Licensing

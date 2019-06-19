@@ -28,7 +28,7 @@ class errno
      * Error file directory
      *
      * Related to "ROOT/$dir/"
-     * Error file should be put in "ROOT/$dir/self::DIR/filename.ini"
+     * Put as "ROOT/$dir/self::DIR/filename.ini"
      */
     const DIR = 'error';
 
@@ -45,13 +45,15 @@ class errno
      * @param string $name
      * @param bool   $lang
      */
-    public static function load(string $dir, string $name, bool $lang = true)
+    public static function load(string $dir, string $name, bool $lang = true): void
     {
-        $file = ROOT . $dir . DIRECTORY_SEPARATOR . self::DIR . DIRECTORY_SEPARATOR . $name . '.ini';
+        $dir = '/' !== $dir ? trim($dir, " /\\\t\n\r\0\x0B") . DIRECTORY_SEPARATOR : '';
+
+        $file = ROOT . $dir . self::DIR . DIRECTORY_SEPARATOR . $name . '.ini';
 
         if (is_array($data = parse_ini_file($file, false, INI_SCANNER_TYPED))) {
             self::$lang = &$lang;
-            self::$pool = &$data;
+            self::$pool = array_replace(self::$pool, $data);
         }
 
         unset($dir, $name, $lang, $file, $data);
@@ -65,8 +67,16 @@ class errno
      */
     public static function set(int $code, int $errno = 0): void
     {
-        system::$error = self::get($code, $errno);
-        unset($code, $errno);
+        //Get error data
+        $error = self::get($code, $errno);
+        $keys  = array_keys($error);
+
+        //Overwrite system error pool
+        foreach ($keys as $key) {
+            system::$error[$key] = $error[$key];
+        }
+
+        unset($code, $errno, $error, $keys, $key);
     }
 
     /**

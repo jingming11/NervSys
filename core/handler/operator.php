@@ -54,7 +54,12 @@ class operator extends factory
         //Process orders
         while (!is_null($item_list = array_shift(parent::$cmd_cgi))) {
             //Get class & name
-            $class = parent::build_name($name = array_shift($item_list));
+            $class = parent::get_app_class($name = array_shift($item_list));
+
+            //Check auto call mode
+            if (empty($item_list) && !parent::$sys['auto_call_mode']) {
+                continue;
+            }
 
             //Get module name
             if (false !== strpos($module = strtr($name, '\\', '/'), '/')) {
@@ -62,19 +67,20 @@ class operator extends factory
             }
 
             try {
-                //Check & load class
-                if (!class_exists($class, false) && !self::load_class($class)) {
-                    //Class NOT exist
-                    continue;
-                }
-
-                //Execute load dependency
+                //Process LOAD dependency
                 if (isset(parent::$load[$module])) {
                     if (is_string(parent::$load[$module])) {
                         parent::$load[$module] = [parent::$load[$module]];
                     }
 
+                    //Execute LOAD dependency
                     self::exec_dep(parent::$load[$module]);
+                }
+
+                //Check & load class
+                if (!class_exists($class, false) && !self::load_class($class)) {
+                    //Class NOT exist
+                    continue;
                 }
 
                 //Check TrustZone permission

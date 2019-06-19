@@ -70,7 +70,7 @@ class factory extends system
      */
     public static function obtain(string $class, array $param = []): object
     {
-        return self::get_stock(__FUNCTION__, self::build_name($class), $param);
+        return self::get_stock(__FUNCTION__, $class, $param);
     }
 
     /**
@@ -110,15 +110,44 @@ class factory extends system
     }
 
     /**
-     * Build class name
+     * Get class name based on app_path
      *
      * @param string $class
      *
      * @return string
      */
-    public static function build_name(string $class): string
+    public static function get_app_class(string $class): string
     {
-        return '\\' . trim(strtr($class, '/', '\\'), '\\');
+        //Get first char
+        $char = substr($class, 0, 1);
+
+        //Refill app_path
+        if (!in_array($char, ['/', '\\'], true)) {
+            $class = parent::$sys['app_path'] . $class;
+        }
+
+        //Build class
+        $class = '\\' . trim(strtr($class, '/', '\\'), '\\');
+
+        unset($char);
+        return $class;
+    }
+
+    /**
+     * Get relative cmd based on app_path
+     *
+     * @param string $cmd
+     *
+     * @return string
+     */
+    public static function get_app_cmd(string $cmd): string
+    {
+        //Remove defined "app_path"
+        if ('' !== self::$sys['app_path'] && 0 === strpos($cmd, self::$sys['app_path'])) {
+            $cmd = substr($cmd, strlen(self::$sys['app_path']));
+        }
+
+        return $cmd;
     }
 
     /**
@@ -136,7 +165,7 @@ class factory extends system
                 list($order, $method) = explode('-', $dep, 2);
             }
 
-            $dep_list[$key] = [$order, self::build_name($order), $method];
+            $dep_list[$key] = [$order, self::get_app_class($order), $method];
         }
 
         unset($key, $dep, $order, $method);

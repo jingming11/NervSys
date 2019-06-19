@@ -22,6 +22,19 @@ namespace ext;
 
 class crypt_img extends crypt
 {
+    //Predefined types
+    const TYPE_MIX  = 'mix';
+    const TYPE_NUM  = 'num';
+    const TYPE_WORD = 'word';
+    const TYPE_PLUS = 'plus';
+    const TYPE_CALC = 'calc';
+
+    //Support types
+    const TYPES = ['mix', 'num', 'word', 'plus', 'calc'];
+
+    //Code output types
+    protected $type = [];
+
     //Lifetime (in seconds)
     protected $life = 60;
 
@@ -32,11 +45,8 @@ class crypt_img extends crypt
     //Length (only works for "num" & "word")
     protected $length = 6;
 
-    //Font filename (stored in "/font/")
+    //Font filename (stored in "/ext/font/")
     protected $font = 'font.ttf';
-
-    //Code type ("": random type, "num", "word", "calc")
-    protected $type = '';
 
     /**
      * Get Code
@@ -46,12 +56,11 @@ class crypt_img extends crypt
      */
     public function get(): array
     {
-        $type   = ['num', 'word', 'calc'];
-        $method = in_array($this->type, $type, true) ? 'gen_' . $this->type : 'gen_' . $type[mt_rand(0, 2)];
+        //Validate code types
+        $type = !empty($type) ? array_intersect($type, self::TYPES) : self::TYPES;
 
         //Generate Auth Code
-        $codes = $this->$method();
-        unset($type, $method);
+        $codes = $this->{'build_' . $type[mt_rand(0, count($type) - 1)]}();
 
         //Encrypt result with lifetime
         $codes['code'] = parent::sign(json_encode(['code' => $codes['code'], 'life' => time() + (0 < $this->life ? $this->life : 60)]));
@@ -59,6 +68,7 @@ class crypt_img extends crypt
         //Image properties
         $font_file = __DIR__ . DIRECTORY_SEPARATOR . 'font' . DIRECTORY_SEPARATOR . $this->font;
 
+        //Calculate image canvas
         $font_height = (int)($this->height / 1.6);
         $font_width  = (int)($this->width / count($codes['char']));
         $font_size   = $font_width < $font_height ? $font_width : $font_height;
@@ -97,7 +107,7 @@ class crypt_img extends crypt
                 $text
             );
 
-            $left_padding += $font_size;
+            $left_padding += $font_size * strlen($text);
         }
 
         unset($codes['char'], $text);
@@ -143,7 +153,7 @@ class crypt_img extends crypt
         ob_clean();
         ob_end_clean();
 
-        unset($font_file, $font_height, $font_width, $font_size, $top_padding, $left_padding, $image);
+        unset($type, $font_file, $font_height, $font_width, $font_size, $top_padding, $left_padding, $image);
         return $codes;
     }
 
@@ -177,11 +187,32 @@ class crypt_img extends crypt
     }
 
     /**
-     * Generate pure number codes
+     * Build mixed codes (letters & numbers)
      *
      * @return array
      */
-    private function gen_num(): array
+    private function build_mix(): array
+    {
+        $result = [];
+
+        $list = array_merge(range('A', 'Z'), range(0, 9));
+
+        for ($i = 0; $i < (int)$this->length; ++$i) {
+            $result['char'][] = $list[mt_rand(0, 35)];
+        }
+
+        $result['code'] = implode($result['char']);
+
+        unset($list, $i);
+        return $result;
+    }
+
+    /**
+     * Build pure number codes
+     *
+     * @return array
+     */
+    private function build_num(): array
     {
         $result = [];
 
@@ -196,11 +227,11 @@ class crypt_img extends crypt
     }
 
     /**
-     * Generate English letter codes
+     * Build English letter codes
      *
      * @return array
      */
-    private function gen_word(): array
+    private function build_word(): array
     {
         $result = [];
 
@@ -217,11 +248,38 @@ class crypt_img extends crypt
     }
 
     /**
-     * Generate Math calculation codes
+     * Build Math plus codes
      *
      * @return array
      */
-    private function gen_calc(): array
+    private function build_plus(): array
+    {
+        $result = [];
+
+        //Generate numbers
+        $number = [mt_rand(0, 9), mt_rand(10, 99)];
+
+        //Plus tow numbers
+        $result['code'] = (string)($number[0] + $number[1]);
+
+        //Add number chars
+        $result['char'][] = (string)$number[$i = mt_rand(0, 1)];
+        $result['char'][] = '+';
+        $result['char'][] = (string)$number[0 === $i ? 1 : 0];
+
+        //Add suffix
+        $result['char'][] = '=';
+
+        unset($num_1, $num_2);
+        return $result;
+    }
+
+    /**
+     * Build Math calculation codes
+     *
+     * @return array
+     */
+    private function build_calc(): array
     {
         $result = [];
 

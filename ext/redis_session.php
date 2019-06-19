@@ -26,50 +26,36 @@ class redis_session extends redis
     const PREFIX = 'SESS:';
 
     //SESSION life
-    private $life = 600;
-
-    /** @var \Redis $connect */
-    private $connect = null;
+    public $life = 600;
 
     /**
-     * redis_session constructor.
-     *
-     * @param int $life
-     *
-     * @throws \RedisException
+     * Start Redis SESSION
      */
-    public function __construct(int $life = 600)
+    public function start(): void
     {
-        //Build connection
-        $this->connect = parent::connect();
-
-        if (PHP_SESSION_ACTIVE !== session_status()) {
-            //Set SESSION GC configurations
-            ini_set('session.gc_divisor', 100);
-            ini_set('session.gc_probability', 100);
-            ini_set('session.gc_maxlifetime', $life);
-
-            //Set SESSION handler
-            session_set_save_handler(
-                [$this, 'session_open'],
-                [$this, 'session_close'],
-                [$this, 'session_read'],
-                [$this, 'session_write'],
-                [$this, 'session_destroy'],
-                [$this, 'session_gc']
-            );
-
-            //Start SESSION
-            register_shutdown_function('session_write_close');
-            session_start();
+        //Check SESSION status
+        if (PHP_SESSION_ACTIVE === session_status()) {
+            return;
         }
 
-        //Set life
-        if (0 < $life) {
-            $this->life = &$life;
-        }
+        //Set SESSION GC configurations
+        ini_set('session.gc_divisor', 100);
+        ini_set('session.gc_probability', 100);
+        ini_set('session.gc_maxlifetime', $this->life);
 
-        unset($life);
+        //Set SESSION handler
+        session_set_save_handler(
+            [$this, 'session_open'],
+            [$this, 'session_close'],
+            [$this, 'session_read'],
+            [$this, 'session_write'],
+            [$this, 'session_destroy'],
+            [$this, 'session_gc']
+        );
+
+        //Start SESSION
+        register_shutdown_function('session_write_close');
+        session_start();
     }
 
     /**
@@ -105,7 +91,7 @@ class redis_session extends redis
      */
     public function session_read(string $session_id): string
     {
-        return (string)$this->connect->get(self::PREFIX . $session_id);
+        return (string)$this->instance->get(self::PREFIX . $session_id);
     }
 
     /**
@@ -118,7 +104,7 @@ class redis_session extends redis
      */
     public function session_write(string $session_id, string $session_data): bool
     {
-        $write = $this->connect->set(self::PREFIX . $session_id, $session_data, $this->life);
+        $write = $this->instance->set(self::PREFIX . $session_id, $session_data, $this->life);
 
         unset($session_id, $session_data);
         return (bool)$write;
@@ -133,7 +119,7 @@ class redis_session extends redis
      */
     public function session_destroy(string $session_id): bool
     {
-        $this->connect->del(self::PREFIX . $session_id);
+        $this->instance->del(self::PREFIX . $session_id);
 
         unset($session_id);
         return true;

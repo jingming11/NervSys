@@ -40,30 +40,12 @@ class redis_queue extends redis
     const PREFIX_LIST   = 'RQ:list:';
     const PREFIX_WORKER = 'RQ:worker:';
 
-    //Expose "root" & "child"
-    public static $tz = 'root,child';
-
     //Process properties
     protected $runs = 10;
     protected $exec = 200;
 
-    /** @var \Redis $connect */
-    private $connect = null;
-
     //Child resources
     private $child = '';
-
-    /**
-     * Connect to Redis
-     *
-     * @return $this
-     * @throws \RedisException
-     */
-    public function connect(): object
-    {
-        $this->connect = parent::connect();
-        return $this;
-    }
 
     /**
      * Add job
@@ -84,24 +66,24 @@ class redis_queue extends redis
         //Check duration
         if (0 < $duration) {
             //Check job duration
-            if (!$this->connect->setnx($cmd_key = self::PREFIX_CMD . hash('crc32b', $cmd), '')) {
+            if (!$this->instance->setnx($cmd_key = self::PREFIX_CMD . hash('crc32b', $cmd), '')) {
                 return -1;
             }
 
             //Set duration life
-            $this->connect->expire($cmd_key, $duration);
+            $this->instance->expire($cmd_key, $duration);
             unset($cmd_key);
         }
 
         //Build group key & queue data
         $list  = self::PREFIX_LIST . ('' === $group ? 'main' : $group);
-        $queue = json_encode($data);
+        $queue = json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 
         //Add watch list & queue list
-        $this->connect->hSet(self::KEY_WATCH_LIST, $list, time());
+        $this->instance->hSet(self::KEY_WATCH_LIST, $list, time());
 
         //Add job & count length
-        $result = (int)$this->connect->lPush($list, $queue);
+        $result = (int)$this->instance->lPush($list, $queue);
 
         unset($cmd, $data, $group, $duration, $list, $queue);
         return $result;
@@ -125,11 +107,11 @@ class redis_queue extends redis
         }
 
         //Remove worker from process list
-        $result = call_user_func_array([$this->connect, 'del'], $process);
+        $result = call_user_func_array([$this->instance, 'del'], $process);
 
         //Remove worker keys
         array_unshift($process, self::KEY_WATCH_WORKER);
-        call_user_func_array([$this->connect, 'hDel'], $process);
+        call_user_func_array([$this->instance, 'hDel'], $process);
 
         unset($key, $process);
         return $result;
@@ -145,11 +127,10 @@ class redis_queue extends redis
      */
     public function show_fail(int $start = 0, int $end = -1): array
     {
-        $list = [];
-
-        //Read failed list
-        $list['len']  = $this->connect->lLen(self::KEY_FAILED);
-        $list['data'] = $this->connect->lRange(self::KEY_FAILED, $start, $end);
+        $list = [
+            'len'  => $this->instance->lLen(self::KEY_FAILED),
+            'data' => $this->instance->lRange(self::KEY_FAILED, $start, $end)
+        ];
 
         unset($start, $end);
         return $list;
@@ -164,7 +145,7 @@ class redis_queue extends redis
      */
     public function show_length(string $queue_key): int
     {
-        return (int)$this->connect->lLen($queue_key);
+        return (int)$this->instance->lLen($queue_key);
     }
 
     /**
@@ -193,7 +174,7 @@ class redis_queue extends redis
      * @param int $runs
      * @param int $exec
      *
-     * @throws \RedisException
+     * @throws \Exception
      */
     public function root(int $runs = 10, int $exec = 200): void
     {
@@ -202,15 +183,12 @@ class redis_queue extends redis
             throw new \Exception('Redis queue only supports CLI!', E_USER_ERROR);
         }
 
-        //Build connection
-        $this->connect();
-
         //Build root process key
         $root_key = self::PREFIX_WORKER . 'root';
 
         //Exit when root process is running
-        if (0 < $this->connect->exists($root_key)) {
-            exit;
+        if (0 < $this->instance->exists($root_key)) {
+            exit('Already running!');
         }
 
         if (0 < $runs) {
@@ -227,10 +205,9 @@ class redis_queue extends redis
         $wait_time = (int)(self::WAIT_SCAN / 2);
         $root_hash = hash('crc32b', uniqid(mt_rand(), true));
 
-        $this->connect->set($root_key, $root_hash, self::WAIT_SCAN);
-
         //Add to watch list
-        $this->connect->hSet(self::KEY_WATCH_WORKER, $root_key, time());
+        $this->instance->set($root_key, $root_hash, self::WAIT_SCAN);
+        $this->instance->hSet(self::KEY_WATCH_WORKER, $root_key, time());
 
         //Close on shutdown
         register_shutdown_function([$this, 'close']);
@@ -239,13 +216,13 @@ class redis_queue extends redis
         $this->child = platform::cmd_bg(
             '"' . platform::php_path() . '" '
             . '"' . ROOT . 'api.php" --ret '
-            . '--cmd="' . strtr(__CLASS__, '\\', '/') . '-child"'
+            . '--cmd="' . parent::get_app_cmd(strtr(get_class($this), '\\', '/')) . '-child"'
         );
 
         do {
             //Get process status
-            $valid   = $this->connect->get($root_key) === $root_hash;
-            $running = $this->connect->expire($root_key, self::WAIT_SCAN);
+            $valid   = $this->instance->get($root_key) === $root_hash;
+            $running = $this->instance->expire($root_key, self::WAIT_SCAN);
 
             //Idle wait on no job or child process running
             if (empty($list = $this->show_queue()) || 1 < count($this->show_process())) {
@@ -254,27 +231,27 @@ class redis_queue extends redis
             }
 
             //Idle wait on no job
-            if (empty($queue = $this->connect->brPop(array_keys($list), $wait_time))) {
+            if (empty($queue = $this->instance->brPop(array_keys($list), $wait_time))) {
                 sleep(self::WAIT_IDLE);
                 continue;
             }
 
             //Re-add queue job
-            $this->connect->rPush($queue[0], $queue[1]);
+            $this->instance->rPush($queue[0], $queue[1]);
+
             //Call child process
             $this->call_child();
         } while ($valid && $running);
 
         //On exit
         self::close();
-
         unset($root_key, $wait_time, $root_hash, $valid, $running, $list, $queue);
     }
 
     /**
      * Start child process
      *
-     * @throws \RedisException
+     * @throws \Exception
      */
     public function child(): void
     {
@@ -283,19 +260,16 @@ class redis_queue extends redis
             throw new \Exception('Redis queue only supports CLI!', E_USER_ERROR);
         }
 
-        //Build connection
-        $this->connect();
-
         //Build Hash & Key
         $child_hash = hash('crc32b', uniqid(mt_rand(), true));
         $child_key  = self::PREFIX_WORKER . $child_hash;
 
         //Set process life
         $wait_time = (int)(self::WAIT_SCAN / 2);
-        $this->connect->set($child_key, '', self::WAIT_SCAN);
 
         //Add to watch list
-        $this->connect->hSet(self::KEY_WATCH_WORKER, $child_key, time());
+        $this->instance->set($child_key, '', self::WAIT_SCAN);
+        $this->instance->hSet(self::KEY_WATCH_WORKER, $child_key, time());
 
         //Close on exit
         register_shutdown_function([$this, 'close'], $child_hash);
@@ -309,14 +283,13 @@ class redis_queue extends redis
             }
 
             //Execute job
-            if (!empty($queue = $this->connect->brPop(array_keys($list), $wait_time))) {
+            if (!empty($queue = $this->instance->brPop(array_keys($list), $wait_time))) {
                 self::exec_job($queue[1]);
             }
-        } while (0 < $this->connect->exists($child_key) && $this->connect->expire($child_key, self::WAIT_SCAN) && ++$execute < $this->exec);
+        } while (0 < $this->instance->exists($child_key) && $this->instance->expire($child_key, self::WAIT_SCAN) && ++$execute < $this->exec);
 
         //On exit
         self::stop($child_hash);
-
         unset($child_hash, $child_key, $wait_time, $execute, $list, $queue);
     }
 
@@ -329,17 +302,17 @@ class redis_queue extends redis
      */
     private function get_keys(string $key): array
     {
-        if (0 === $this->connect->exists($key)) {
+        if (0 === $this->instance->exists($key)) {
             return [];
         }
 
-        if (empty($keys = $this->connect->hGetAll($key))) {
+        if (empty($keys = $this->instance->hGetAll($key))) {
             return [];
         }
 
         foreach ($keys as $k => $v) {
-            if (0 === $this->connect->exists($k)) {
-                $this->connect->hDel($key, $k);
+            if (0 === $this->instance->exists($k)) {
+                $this->instance->hDel($key, $k);
                 unset($keys[$k]);
             }
         }
@@ -366,7 +339,7 @@ class redis_queue extends redis
         //Count jobs
         $jobs = 0;
         foreach ($queue as $key => $item) {
-            $jobs += $this->connect->lLen($key);
+            $jobs += $this->instance->lLen($key);
         }
 
         //Exit on no job
@@ -411,9 +384,9 @@ class redis_queue extends redis
             //Get order & method
             list($order, $method) = explode('-', $input['cmd'], 2);
 
-            //Process dependency
+            //Process LOAD dependency
             if (false !== strpos($module = strtr($order, '\\', '/'), '/')) {
-                $module = strstr($module, '/', true);
+                $module = strstr(parent::get_app_cmd($module), '/', true);
             }
 
             if (isset(parent::$load[$module])) {
@@ -431,7 +404,7 @@ class redis_queue extends redis
             }
 
             //Save class & method
-            $job_list[] = [parent::build_name($order), $method];
+            $job_list[] = [parent::get_app_class($order), $method];
 
             //Execute jobs
             foreach ($job_list as $job) {
@@ -465,7 +438,7 @@ class redis_queue extends redis
                 self::check_job($data, json_encode($result));
             }
         } catch (\Throwable $throwable) {
-            $this->connect->lPush(self::KEY_FAILED, json_encode(['data' => &$data, 'return' => $throwable->getMessage()]));
+            $this->instance->lPush(self::KEY_FAILED, json_encode(['data' => &$data, 'return' => $throwable->getMessage()], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
             unset($throwable);
             return;
         }
@@ -487,7 +460,7 @@ class redis_queue extends redis
 
         //Save to fail list
         if (!is_null($json) && true !== $json) {
-            $this->connect->lPush(self::KEY_FAILED, json_encode(['data' => &$data, 'return' => &$result]));
+            $this->instance->lPush(self::KEY_FAILED, json_encode(['data' => &$data, 'return' => &$result], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
         }
 
         unset($data, $result, $json);
